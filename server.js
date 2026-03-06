@@ -191,6 +191,77 @@ app.delete('/api/providers/:providerName/models/:modelId', requireAuth, (req, re
     }
 });
 
+
+app.put('/api/providers/:oldName', requireAuth, (req, res) => {
+    const { oldName } = req.params;
+    const { name, baseUrl, apiKey, api } = req.body;
+    try {
+        const config = readOpenclawConfig();
+        if (config.models?.providers && config.models.providers[oldName]) {
+            const providerData = config.models.providers[oldName];
+            
+            // If name changed, move the object
+            if (name && name !== oldName) {
+                config.models.providers[name] = providerData;
+                delete config.models.providers[oldName];
+            }
+            
+            const targetName = name || oldName;
+            if (baseUrl) config.models.providers[targetName].baseUrl = baseUrl;
+            if (apiKey) config.models.providers[targetName].apiKey = apiKey;
+            if (api) config.models.providers[targetName].api = api;
+
+            // Also update active model if it matched this provider
+            const activeModel = config.agents?.defaults?.model?.primary;
+            if (activeModel && activeModel.startsWith(oldName + '/')) {
+                config.agents.defaults.model.primary = activeModel.replace(oldName + '/', targetName + '/');
+            }
+            
+            writeOpenclawConfig(config);
+            res.json({ success: true });
+        } else {
+            res.status(404).json({ error: '找不到提供商' });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/api/providers/:providerName/models/:oldModelId', requireAuth, (req, res) => {
+    const { providerName, oldModelId } = req.params;
+    const { id, name, contextWindow, maxTokens } = req.body;
+    try {
+        const config = readOpenclawConfig();
+        if (config.models?.providers && config.models.providers[providerName]) {
+            const models = config.models.providers[providerName].models || [];
+            const modelIndex = models.findIndex(m => m.id === oldModelId);
+            
+            if (modelIndex !== -1) {
+                if (id) models[modelIndex].id = id;
+                if (name) models[modelIndex].name = name;
+                if (contextWindow) models[modelIndex].contextWindow = contextWindow;
+                if (maxTokens) models[modelIndex].maxTokens = maxTokens;
+                
+                // Update active model reference if id changed
+                if (id && id !== oldModelId) {
+                    const activeModel = config.agents?.defaults?.model?.primary;
+                    if (activeModel === providerName + '/' + oldModelId) {
+                        config.agents.defaults.model.primary = providerName + '/' + id;
+                    }
+                }
+                
+                writeOpenclawConfig(config);
+                res.json({ success: true });
+            } else {
+                res.status(404).json({ error: '找不到模型' });
+            }
+        } else {
+            res.status(404).json({ error: '找不到提供商' });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
 app.post('/api/active-model', requireAuth, (req, res) => {
     const { modelStr } = req.body;
     try {

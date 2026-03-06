@@ -143,7 +143,7 @@ document.getElementById('saveActiveModelBtn')?.addEventListener('click', async (
 
     try {
         const res = await fetch('/api/active-model', {
-            method: 'POST',
+            method: method,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ modelStr })
         });
@@ -196,6 +196,13 @@ function renderProviders() {
         addModelBtn.textContent = '添加模型';
         addModelBtn.onclick = () => openModelModal(providerName);
 
+        const editProviderBtn = document.createElement('button');
+        editProviderBtn.className = 'btn btn-secondary';
+        editProviderBtn.style.padding = '6px 12px';
+        editProviderBtn.style.marginRight = '8px';
+        editProviderBtn.textContent = '编辑渠道';
+        editProviderBtn.onclick = () => openEditProviderModal(providerName, provider);
+        actionsContainer.appendChild(editProviderBtn);
         const delProviderBtn = document.createElement('button');
         delProviderBtn.className = 'btn btn-danger';
         delProviderBtn.style.padding = '6px 12px';
@@ -233,6 +240,7 @@ function renderProviders() {
                             <td>${m.contextWindow || '-'}</td>
                             <td>${isPrimary ? '<span class="badge badge-active">当前默认</span>' : ''}</td>
                             <td>
+                                <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 12px; margin-right: 4px;" onclick="openEditModelModal('${providerName}', '${m.id}', '${m.name || ''}', ${m.contextWindow || 128000}, ${m.maxTokens || 4096})">编辑</button>
                                 <button class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;" onclick="deleteModel('${providerName}', '${m.id}')">删除</button>
                             </td>
                         </tr>
@@ -256,11 +264,16 @@ function renderProviders() {
 
 document.getElementById('addProviderBtn')?.addEventListener('click', () => {
     document.getElementById('providerForm').reset();
+    document.getElementById('editOldProviderName').value = '';
+    document.getElementById('providerModalTitle').textContent = '添加渠道';
     document.getElementById('providerModal').classList.add('active');
 });
 
 document.getElementById('providerForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const oldName = document.getElementById('editOldProviderName').value;
+    const isEdit = !!oldName;
+    
     const data = {
         name: document.getElementById('providerName').value,
         baseUrl: document.getElementById('providerBaseUrl').value,
@@ -269,8 +282,10 @@ document.getElementById('providerForm')?.addEventListener('submit', async (e) =>
     };
 
     try {
-        const res = await fetch('/api/providers', {
-            method: 'POST',
+        const url = isEdit ? '/api/providers/' + encodeURIComponent(oldName) : '/api/providers';
+        const method = isEdit ? 'PUT' : 'POST';
+        const res = await fetch(url, {
+            method: method,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
@@ -303,6 +318,8 @@ async function deleteProvider(name) {
 // --- Model Management ---
 function openModelModal(providerName) {
     document.getElementById('modelForm').reset();
+    document.getElementById('editOldModelId').value = '';
+    document.getElementById('modelModalTitle').textContent = '添加模型';
     document.getElementById('modelProviderName').value = providerName;
     document.getElementById('modelModal').classList.add('active');
 }
@@ -318,8 +335,13 @@ document.getElementById('modelForm')?.addEventListener('submit', async (e) => {
     };
 
     try {
-        const res = await fetch(`/api/providers/${encodeURIComponent(providerName)}/models`, {
-            method: 'POST',
+        
+    const oldModelId = document.getElementById('editOldModelId').value;
+    const isEdit = !!oldModelId;
+    const url = isEdit ? `/api/providers/${encodeURIComponent(providerName)}/models/${encodeURIComponent(oldModelId)}` : `/api/providers/${encodeURIComponent(providerName)}/models`;
+    const method = isEdit ? 'PUT' : 'POST';
+    const res = await fetch(url, { method: method,
+            method: method,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
@@ -347,4 +369,36 @@ async function deleteModel(providerName, modelId) {
     } catch (e) {
         alert('网络错误');
     }
+}
+
+
+// --- EDIT FUNCTIONS ---
+function openEditProviderModal(name, provider) {
+    document.getElementById('providerForm').reset();
+    document.getElementById('editOldProviderName').value = '';
+    document.getElementById('providerModalTitle').textContent = '添加渠道';
+    document.getElementById('editOldProviderName').value = name;
+    document.getElementById('providerName').value = name;
+    document.getElementById('providerBaseUrl').value = provider.baseUrl || '';
+    document.getElementById('providerApiKey').value = provider.apiKey || '';
+    document.getElementById('providerApiType').value = provider.api || 'openai-completions';
+    
+    document.getElementById('providerModalTitle').textContent = '编辑渠道';
+    document.getElementById('providerModal').classList.add('active');
+}
+
+function openEditModelModal(providerName, id, name, contextWindow, maxTokens) {
+    document.getElementById('modelForm').reset();
+    document.getElementById('editOldModelId').value = '';
+    document.getElementById('modelModalTitle').textContent = '添加模型';
+    document.getElementById('modelProviderName').value = providerName;
+    document.getElementById('editOldModelId').value = id;
+    
+    document.getElementById('modelId').value = id;
+    document.getElementById('modelName').value = name || id;
+    document.getElementById('modelContextWindow').value = contextWindow;
+    document.getElementById('modelMaxTokens').value = maxTokens;
+    
+    document.getElementById('modelModalTitle').textContent = '编辑模型';
+    document.getElementById('modelModal').classList.add('active');
 }
