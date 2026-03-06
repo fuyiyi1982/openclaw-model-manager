@@ -67,6 +67,7 @@
                 <button class="close-btn" data-modal="providerModal">&times;</button>
             </div>
             <form id="providerForm">
+                <input type="hidden" id="editOldProviderName">
                 <div class="form-group">
                     <label for="providerName">渠道名称 (唯一标识)</label>
                     <input type="text" id="providerName" required placeholder="例如: custom-bot">
@@ -98,12 +99,12 @@
     <div id="modelModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>添加模型</h3>
+                <h3 id="modelModalTitle">添加模型</h3>
                 <button class="close-btn" data-modal="modelModal">&times;</button>
             </div>
             <form id="modelForm">
                 <input type="hidden" id="modelProviderName">
-<input type="hidden" id="editOldModelId">
+                <input type="hidden" id="editOldModelId">
                 <div class="form-group">
                     <label for="modelId">模型 ID</label>
                     <input type="text" id="modelId" required placeholder="例如: gpt-4o">

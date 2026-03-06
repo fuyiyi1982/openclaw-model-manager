@@ -1,6 +1,20 @@
 // State
 let globalConfig = null;
 
+async function readErrorMessage(res, fallback = '请求失败') {
+    const cloned = res.clone();
+    try {
+        const data = await res.json();
+        if (data && data.error) return data.error;
+    } catch (_) {
+        try {
+            const text = await cloned.text();
+            if (text && text.trim()) return `${fallback} (HTTP ${res.status})`;
+        } catch (__){ }
+    }
+    return `${fallback} (HTTP ${res.status})`;
+}
+
 // Initial Load
 document.addEventListener('DOMContentLoaded', () => {
     if (window.location.pathname === '/' || window.location.pathname === '/index.html') {
@@ -151,7 +165,7 @@ document.getElementById('saveActiveModelBtn')?.addEventListener('click', async (
             alert('默认模型保存成功');
             fetchConfig();
         } else {
-            alert('保存失败');
+            alert('保存失败: ' + await readErrorMessage(res, '保存失败'));
         }
     } catch (e) {
         alert('网络错误');
@@ -293,8 +307,7 @@ document.getElementById('providerForm')?.addEventListener('submit', async (e) =>
             document.getElementById('providerModal').classList.remove('active');
             fetchConfig();
         } else {
-            const err = await res.json();
-            alert('添加失败: ' + err.error);
+            alert('添加失败: ' + await readErrorMessage(res, '添加失败'));
         }
     } catch (e) {
         alert('网络错误');
@@ -348,8 +361,7 @@ document.getElementById('modelForm')?.addEventListener('submit', async (e) => {
             document.getElementById('modelModal').classList.remove('active');
             fetchConfig();
         } else {
-            const err = await res.json();
-            alert('操作失败: ' + err.error);
+            alert('操作失败: ' + await readErrorMessage(res, '操作失败'));
         }
     } catch (e) {
         alert('网络错误');
