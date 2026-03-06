@@ -334,13 +334,12 @@ document.getElementById('modelForm')?.addEventListener('submit', async (e) => {
         maxTokens: parseInt(document.getElementById('modelMaxTokens').value, 10)
     };
 
-    try {
-        
     const oldModelId = document.getElementById('editOldModelId').value;
     const isEdit = !!oldModelId;
     const url = isEdit ? `/api/providers/${encodeURIComponent(providerName)}/models/${encodeURIComponent(oldModelId)}` : `/api/providers/${encodeURIComponent(providerName)}/models`;
     const method = isEdit ? 'PUT' : 'POST';
-    const res = await fetch(url, { method: method,
+    try {
+        const res = await fetch(url, {
             method: method,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -350,7 +349,7 @@ document.getElementById('modelForm')?.addEventListener('submit', async (e) => {
             fetchConfig();
         } else {
             const err = await res.json();
-            alert('添加失败: ' + err.error);
+            alert('操作失败: ' + err.error);
         }
     } catch (e) {
         alert('网络错误');
