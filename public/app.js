@@ -205,12 +205,14 @@ function renderProviders() {
         actionsContainer.className = 'actions-cell';
 
         const addModelBtn = document.createElement('button');
+        addModelBtn.type = 'button';
         addModelBtn.className = 'btn btn-secondary';
         addModelBtn.style.padding = '6px 12px';
         addModelBtn.textContent = '添加模型';
         addModelBtn.onclick = () => openModelModal(providerName);
 
         const editProviderBtn = document.createElement('button');
+        editProviderBtn.type = 'button';
         editProviderBtn.className = 'btn btn-secondary';
         editProviderBtn.style.padding = '6px 12px';
         editProviderBtn.style.marginRight = '8px';
@@ -218,10 +220,11 @@ function renderProviders() {
         editProviderBtn.onclick = () => openEditProviderModal(providerName, provider);
         actionsContainer.appendChild(editProviderBtn);
         const delProviderBtn = document.createElement('button');
+        delProviderBtn.type = 'button';
         delProviderBtn.className = 'btn btn-danger';
         delProviderBtn.style.padding = '6px 12px';
         delProviderBtn.textContent = '删除渠道';
-        delProviderBtn.onclick = () => deleteProvider(providerName);
+        delProviderBtn.onclick = (event) => deleteProvider(event, providerName);
 
         actionsContainer.appendChild(addModelBtn);
         actionsContainer.appendChild(delProviderBtn);
@@ -254,8 +257,8 @@ function renderProviders() {
                             <td>${m.contextWindow || '-'}</td>
                             <td>${isPrimary ? '<span class="badge badge-active">当前默认</span>' : ''}</td>
                             <td>
-                                <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 12px; margin-right: 4px;" onclick="openEditModelModal('${providerName}', '${m.id}', '${m.name || ''}', ${m.contextWindow || 128000}, ${m.maxTokens || 4096})">编辑</button>
-                                <button class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;" onclick="deleteModel('${providerName}', '${m.id}')">删除</button>
+                                <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 12px; margin-right: 4px;" onclick="openEditModelModal('${providerName}', '${m.id}', '${m.name || ''}', ${m.contextWindow || 128000}, ${m.maxTokens || 4096})">编辑</button>
+                                <button type="button" class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;" onclick="deleteModel(event, '${providerName}', '${m.id}')">删除</button>
                             </td>
                         </tr>
                         `;
@@ -306,6 +309,7 @@ document.getElementById('providerForm')?.addEventListener('submit', async (e) =>
         if (res.ok) {
             document.getElementById('providerModal').classList.remove('active');
             fetchConfig();
+            alert(isEdit ? '渠道更新成功' : '渠道添加成功');
         } else {
             alert('添加失败: ' + await readErrorMessage(res, '添加失败'));
         }
@@ -314,12 +318,17 @@ document.getElementById('providerForm')?.addEventListener('submit', async (e) =>
     }
 });
 
-async function deleteProvider(name) {
+async function deleteProvider(event, name) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
     if (!confirm(`确定要删除渠道 ${name} 吗？这将删除其下所有模型。`)) return;
     try {
         const res = await fetch(`/api/providers/${encodeURIComponent(name)}`, { method: 'DELETE' });
         if (res.ok) {
             fetchConfig();
+            alert('删除成功');
         } else {
             alert('删除失败');
         }
@@ -360,6 +369,7 @@ document.getElementById('modelForm')?.addEventListener('submit', async (e) => {
         if (res.ok) {
             document.getElementById('modelModal').classList.remove('active');
             fetchConfig();
+            alert(isEdit ? '模型更新成功' : '模型添加成功');
         } else {
             alert('操作失败: ' + await readErrorMessage(res, '操作失败'));
         }
@@ -368,12 +378,17 @@ document.getElementById('modelForm')?.addEventListener('submit', async (e) => {
     }
 });
 
-async function deleteModel(providerName, modelId) {
+async function deleteModel(event, providerName, modelId) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
     if (!confirm(`确定要删除模型 ${modelId} 吗？`)) return;
     try {
         const res = await fetch(`/api/providers/${encodeURIComponent(providerName)}/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
         if (res.ok) {
             fetchConfig();
+            alert('删除成功');
         } else {
             alert('删除失败');
         }
