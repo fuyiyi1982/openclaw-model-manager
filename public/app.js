@@ -143,7 +143,7 @@ document.getElementById('saveActiveModelBtn')?.addEventListener('click', async (
 
     try {
         const res = await fetch('/api/active-model', {
-            method: method,
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ modelStr })
         });
