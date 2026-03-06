@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>设置 - OpenClaw 控制面板</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <a href="/" class="nav-brand">OpenClaw 控制面板</a>
+        <div class="nav-links">
+            <a href="/">模型管理</a>
+            <a href="/settings">设置</a>
+            <a href="#" id="logoutBtn">退出登录</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">修改密码</div>
+            </div>
+            <form id="passwordForm">
+                <div class="form-group">
+                    <label for="currentPassword">当前密码</label>
+                    <input type="password" id="currentPassword" required>
+                </div>
+                <div class="form-group">
+                    <label for="newPassword">新密码</label>
+                    <input type="password" id="newPassword" required>
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">确认新密码</label>
+                    <input type="password" id="confirmPassword" required>
+                </div>
+                <div id="msg" class="mb-3" style="display: none;"></div>
+                <button type="submit" class="btn">保存修改</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+    <script>
+        document.getElementById('passwordForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const currentPassword = document.getElementById('currentPassword').value;
+            const newPassword = document.getElementById('newPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            const msg = document.getElementById('msg');
+
+            if (newPassword !== confirmPassword) {
+                msg.textContent = '两次输入的新密码不一致';
+                msg.style.color = 'var(--danger-color)';
+                msg.style.display = 'block';
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/change-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ currentPassword, newPassword })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    msg.textContent = '密码修改成功，请重新登录';
+                    msg.style.color = 'var(--success-color)';
+                    msg.style.display = 'block';
+                    document.getElementById('passwordForm').reset();
+
+                    setTimeout(() => {
+                        window.location.href = '/login.html';
+                    }, 2000);
+                } else {
+                    msg.textContent = data.error || '修改失败';
+                    msg.style.color = 'var(--danger-color)';
+                    msg.style.display = 'block';
+                }
+            } catch (err) {
+                msg.textContent = '网络错误';
+                msg.style.color = 'var(--danger-color)';
+                msg.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
