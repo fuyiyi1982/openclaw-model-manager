@@ -159,6 +159,55 @@ function tryParseJson(value) {
     }
 }
 
+function toPositiveInteger(value) {
+    const parsed = Number.parseInt(String(value ?? '0'), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function hasServiceOutputSignal(output, pattern) {
+    return typeof output === 'string' && pattern.test(output);
+}
+
+function inferServiceRunning(result) {
+    const active = typeof result?.active === 'string' ? result.active.trim().toLowerCase() : 'unknown';
+    const subState = typeof result?.subState === 'string' ? result.subState.trim().toLowerCase() : 'unknown';
+    const lifecycleResult = typeof result?.result === 'string' ? result.result.trim().toLowerCase() : 'unknown';
+    const mainPid = toPositiveInteger(result?.mainPid);
+    const execMainPid = toPositiveInteger(result?.execMainPid);
+    const listening = result?.listening === true;
+    const output = typeof result?.output === 'string' ? result.output : '';
+
+    if (active === 'active' && !['dead', 'failed', 'exited'].includes(subState)) {
+        return true;
+    }
+
+    if (['activating', 'reloading'].includes(active) || ['start', 'start-pre', 'start-post', 'running', 'reload'].includes(subState)) {
+        return true;
+    }
+
+    if (mainPid > 0 || execMainPid > 0) {
+        return true;
+    }
+
+    if (listening && lifecycleResult !== 'failed') {
+        return true;
+    }
+
+    if (hasServiceOutputSignal(output, /Active:\s+active\s+\(running\)/i)) {
+        return true;
+    }
+
+    if (hasServiceOutputSignal(output, /Main PID:\s*[1-9]\d*/i)) {
+        return true;
+    }
+
+    if (hasServiceOutputSignal(output, /gateway service disabled|gateway start blocked|service disabled/i)) {
+        return false;
+    }
+
+    return false;
+}
+
 async function readOpenclawConfig() {
     const output = await runManageConfig('read');
     if (!output) {
@@ -318,6 +367,18 @@ async function runServiceCommand(action) {
                 active: typeof parsed.active === 'string' ? parsed.active : 'unknown',
                 subState: typeof parsed.subState === 'string' ? parsed.subState : 'unknown',
                 enabled: typeof parsed.enabled === 'string' ? parsed.enabled : 'unknown',
+                result: typeof parsed.result === 'string' ? parsed.result : 'unknown',
+                mainPid: toPositiveInteger(parsed.mainPid),
+                execMainPid: toPositiveInteger(parsed.execMainPid),
+                execMainStatus: typeof parsed.execMainStatus === 'string' ? parsed.execMainStatus : 'unknown',
+                execMainCode: typeof parsed.execMainCode === 'string' ? parsed.execMainCode : 'unknown',
+                unitFileState: typeof parsed.unitFileState === 'string' ? parsed.unitFileState : 'unknown',
+                type: typeof parsed.type === 'string' ? parsed.type : 'unknown',
+                fragmentPath: typeof parsed.fragmentPath === 'string' ? parsed.fragmentPath : '',
+                gatewayPort: typeof parsed.gatewayPort === 'string' ? parsed.gatewayPort : 'unknown',
+                listening: parsed.listening === true,
+                listenerPid: toPositiveInteger(parsed.listenerPid),
+                listenerCommand: typeof parsed.listenerCommand === 'string' ? parsed.listenerCommand : '',
                 scope: typeof parsed.scope === 'string' ? parsed.scope : '',
                 unit: typeof parsed.unit === 'string' ? parsed.unit : '',
                 serviceFile: typeof parsed.serviceFile === 'string' ? parsed.serviceFile : '',
@@ -325,7 +386,25 @@ async function runServiceCommand(action) {
             };
         }
 
-        return { success: true, output: rawOutput, active: 'unknown', subState: 'unknown', enabled: 'unknown' };
+        return {
+            success: true,
+            output: rawOutput,
+            active: 'unknown',
+            subState: 'unknown',
+            enabled: 'unknown',
+            result: 'unknown',
+            mainPid: 0,
+            execMainPid: 0,
+            execMainStatus: 'unknown',
+            execMainCode: 'unknown',
+            unitFileState: 'unknown',
+            type: 'unknown',
+            fragmentPath: '',
+            gatewayPort: 'unknown',
+            listening: false,
+            listenerPid: 0,
+            listenerCommand: ''
+        };
     } catch (error) {
         const rawOutput = serializeServiceOutput(error.stdout, error.stderr, error);
         const parsed = tryParseJson(rawOutput);
@@ -337,6 +416,18 @@ async function runServiceCommand(action) {
                 active: typeof parsed.active === 'string' ? parsed.active : 'unknown',
                 subState: typeof parsed.subState === 'string' ? parsed.subState : 'unknown',
                 enabled: typeof parsed.enabled === 'string' ? parsed.enabled : 'unknown',
+                result: typeof parsed.result === 'string' ? parsed.result : 'unknown',
+                mainPid: toPositiveInteger(parsed.mainPid),
+                execMainPid: toPositiveInteger(parsed.execMainPid),
+                execMainStatus: typeof parsed.execMainStatus === 'string' ? parsed.execMainStatus : 'unknown',
+                execMainCode: typeof parsed.execMainCode === 'string' ? parsed.execMainCode : 'unknown',
+                unitFileState: typeof parsed.unitFileState === 'string' ? parsed.unitFileState : 'unknown',
+                type: typeof parsed.type === 'string' ? parsed.type : 'unknown',
+                fragmentPath: typeof parsed.fragmentPath === 'string' ? parsed.fragmentPath : '',
+                gatewayPort: typeof parsed.gatewayPort === 'string' ? parsed.gatewayPort : 'unknown',
+                listening: parsed.listening === true,
+                listenerPid: toPositiveInteger(parsed.listenerPid),
+                listenerCommand: typeof parsed.listenerCommand === 'string' ? parsed.listenerCommand : '',
                 scope: typeof parsed.scope === 'string' ? parsed.scope : '',
                 unit: typeof parsed.unit === 'string' ? parsed.unit : '',
                 serviceFile: typeof parsed.serviceFile === 'string' ? parsed.serviceFile : '',
@@ -350,6 +441,18 @@ async function runServiceCommand(action) {
             active: 'unknown',
             subState: 'unknown',
             enabled: 'unknown',
+            result: 'unknown',
+            mainPid: 0,
+            execMainPid: 0,
+            execMainStatus: 'unknown',
+            execMainCode: 'unknown',
+            unitFileState: 'unknown',
+            type: 'unknown',
+            fragmentPath: '',
+            gatewayPort: 'unknown',
+            listening: false,
+            listenerPid: 0,
+            listenerCommand: '',
             error: error.message
         };
     }
@@ -681,18 +784,42 @@ app.get('/api/service/status', requireAuth, async (req, res) => {
             active: result.active || 'unknown',
             subState: result.subState || 'unknown',
             enabled: result.enabled || 'unknown',
+            result: result.result || 'unknown',
+            mainPid: result.mainPid || 0,
+            execMainPid: result.execMainPid || 0,
+            execMainStatus: result.execMainStatus || 'unknown',
+            execMainCode: result.execMainCode || 'unknown',
+            unitFileState: result.unitFileState || 'unknown',
+            type: result.type || 'unknown',
+            fragmentPath: result.fragmentPath || '',
+            gatewayPort: result.gatewayPort || 'unknown',
+            listening: result.listening === true,
+            listenerPid: result.listenerPid || 0,
+            listenerCommand: result.listenerCommand || '',
             unit: result.unit || '',
             scope: result.scope || ''
         });
     }
 
-    const isRunning = result.active === 'active';
+    const isRunning = inferServiceRunning(result);
     return res.json({
         output: result.output || '',
         isRunning,
         active: result.active || 'unknown',
         subState: result.subState || 'unknown',
         enabled: result.enabled || 'unknown',
+        result: result.result || 'unknown',
+        mainPid: result.mainPid || 0,
+        execMainPid: result.execMainPid || 0,
+        execMainStatus: result.execMainStatus || 'unknown',
+        execMainCode: result.execMainCode || 'unknown',
+        unitFileState: result.unitFileState || 'unknown',
+        type: result.type || 'unknown',
+        fragmentPath: result.fragmentPath || '',
+        gatewayPort: result.gatewayPort || 'unknown',
+        listening: result.listening === true,
+        listenerPid: result.listenerPid || 0,
+        listenerCommand: result.listenerCommand || '',
         unit: result.unit || '',
         scope: result.scope || '',
         serviceFile: result.serviceFile || ''
@@ -708,16 +835,41 @@ app.post('/api/service/restart', requireAuth, async (req, res) => {
             active: result.active || 'unknown',
             subState: result.subState || 'unknown',
             enabled: result.enabled || 'unknown',
+            result: result.result || 'unknown',
+            mainPid: result.mainPid || 0,
+            execMainPid: result.execMainPid || 0,
+            execMainStatus: result.execMainStatus || 'unknown',
+            execMainCode: result.execMainCode || 'unknown',
+            unitFileState: result.unitFileState || 'unknown',
+            type: result.type || 'unknown',
+            fragmentPath: result.fragmentPath || '',
+            gatewayPort: result.gatewayPort || 'unknown',
+            listening: result.listening === true,
+            listenerPid: result.listenerPid || 0,
+            listenerCommand: result.listenerCommand || '',
             unit: result.unit || '',
             scope: result.scope || ''
         });
     }
     return res.json({
         success: true,
+        isRunning: inferServiceRunning(result),
         output: result.output || '',
         active: result.active || 'unknown',
         subState: result.subState || 'unknown',
         enabled: result.enabled || 'unknown',
+        result: result.result || 'unknown',
+        mainPid: result.mainPid || 0,
+        execMainPid: result.execMainPid || 0,
+        execMainStatus: result.execMainStatus || 'unknown',
+        execMainCode: result.execMainCode || 'unknown',
+        unitFileState: result.unitFileState || 'unknown',
+        type: result.type || 'unknown',
+        fragmentPath: result.fragmentPath || '',
+        gatewayPort: result.gatewayPort || 'unknown',
+        listening: result.listening === true,
+        listenerPid: result.listenerPid || 0,
+        listenerCommand: result.listenerCommand || '',
         unit: result.unit || '',
         scope: result.scope || ''
     });
@@ -732,16 +884,41 @@ app.post('/api/service/stop', requireAuth, async (req, res) => {
             active: result.active || 'unknown',
             subState: result.subState || 'unknown',
             enabled: result.enabled || 'unknown',
+            result: result.result || 'unknown',
+            mainPid: result.mainPid || 0,
+            execMainPid: result.execMainPid || 0,
+            execMainStatus: result.execMainStatus || 'unknown',
+            execMainCode: result.execMainCode || 'unknown',
+            unitFileState: result.unitFileState || 'unknown',
+            type: result.type || 'unknown',
+            fragmentPath: result.fragmentPath || '',
+            gatewayPort: result.gatewayPort || 'unknown',
+            listening: result.listening === true,
+            listenerPid: result.listenerPid || 0,
+            listenerCommand: result.listenerCommand || '',
             unit: result.unit || '',
             scope: result.scope || ''
         });
     }
     return res.json({
         success: true,
+        isRunning: inferServiceRunning(result),
         output: result.output || '',
         active: result.active || 'unknown',
         subState: result.subState || 'unknown',
         enabled: result.enabled || 'unknown',
+        result: result.result || 'unknown',
+        mainPid: result.mainPid || 0,
+        execMainPid: result.execMainPid || 0,
+        execMainStatus: result.execMainStatus || 'unknown',
+        execMainCode: result.execMainCode || 'unknown',
+        unitFileState: result.unitFileState || 'unknown',
+        type: result.type || 'unknown',
+        fragmentPath: result.fragmentPath || '',
+        gatewayPort: result.gatewayPort || 'unknown',
+        listening: result.listening === true,
+        listenerPid: result.listenerPid || 0,
+        listenerCommand: result.listenerCommand || '',
         unit: result.unit || '',
         scope: result.scope || ''
     });
