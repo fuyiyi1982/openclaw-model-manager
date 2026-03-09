@@ -1,430 +1,540 @@
-// State
-let globalConfig = null;
+let globalConfig = { providers: {}, activeModel: '' };
+let statusTimer = null;
+
+function $(id) {
+    return document.getElementById(id);
+}
+
+function showModal(modalId) {
+    $(modalId)?.classList.add('active');
+}
+
+function hideModal(modalId) {
+    $(modalId)?.classList.remove('active');
+}
+
+function setText(id, value) {
+    const element = $(id);
+    if (element) {
+        element.textContent = value;
+    }
+}
+
+function createElement(tag, className, text) {
+    const element = document.createElement(tag);
+    if (className) {
+        element.className = className;
+    }
+    if (text !== undefined) {
+        element.textContent = text;
+    }
+    return element;
+}
 
 async function readErrorMessage(res, fallback = '请求失败') {
-    const cloned = res.clone();
     try {
-        const data = await res.json();
-        if (data && data.error) return data.error;
+        const data = await res.clone().json();
+        if (data && data.error) {
+            return data.error;
+        }
     } catch (_) {
         try {
-            const text = await cloned.text();
-            if (text && text.trim()) return `${fallback} (HTTP ${res.status})`;
-        } catch (__){ }
+            const text = await res.clone().text();
+            if (text && text.trim()) {
+                return `${fallback} (HTTP ${res.status})`;
+            }
+        } catch (__){}
     }
+
     return `${fallback} (HTTP ${res.status})`;
 }
 
-// Initial Load
-document.addEventListener('DOMContentLoaded', () => {
-    if (window.location.pathname === '/' || window.location.pathname === '/index.html') {
-        fetchConfig();
-        fetchStatus();
-        setInterval(fetchStatus, 30000); // Auto refresh status every 30s
-    }
-
-    // Modal Handling
-    document.querySelectorAll('.close-btn, .close-btn-action').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            const modalId = btn.getAttribute('data-modal');
-            document.getElementById(modalId).classList.remove('active');
-        });
+async function apiFetch(url, options = {}) {
+    const res = await fetch(url, {
+        credentials: 'same-origin',
+        ...options,
+        headers: {
+            'Content-Type': 'application/json',
+            ...(options.headers || {})
+        }
     });
 
-    // Logout
-    const logoutBtn = document.getElementById('logoutBtn');
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', async (e) => {
-            e.preventDefault();
-            await fetch('/api/logout', { method: 'POST' });
-            window.location.href = '/login.html';
-        });
+    if (res.status === 401) {
+        window.location.href = '/login.html';
+        throw new Error('Unauthorized');
     }
-});
 
-// --- Service Management ---
-async function fetchStatus() {
-    try {
-        const res = await fetch('/api/service/status');
-        if (res.status === 401) window.location.href = '/login.html';
-        const data = await res.json();
-
-        const indicator = document.getElementById('statusIndicator');
-        const text = document.getElementById('statusText');
-        const output = document.getElementById('terminalOutput');
-
-        if (data.isRunning) {
-            indicator.className = 'status-indicator status-online';
-            text.textContent = '运行中';
-        } else {
-            indicator.className = 'status-indicator status-offline';
-            text.textContent = '已停止';
-        }
-
-        if (data.output) {
-            output.textContent = data.output;
-            output.style.display = 'block';
-        }
-    } catch (e) {
-        console.error('Failed to fetch status:', e);
-    }
+    return res;
 }
 
-document.getElementById('restartBtn')?.addEventListener('click', async () => {
-    document.getElementById('statusText').textContent = '正在重启...';
-    try {
-        const res = await fetch('/api/service/restart', { method: 'POST' });
-        const data = await res.json();
-        document.getElementById('terminalOutput').textContent = data.output || data.error;
-        document.getElementById('terminalOutput').style.display = 'block';
-        setTimeout(fetchStatus, 2000);
-    } catch (e) {
-        alert('操作失败');
-    }
-});
-
-document.getElementById('stopBtn')?.addEventListener('click', async () => {
-    if (!confirm('确定要停止服务吗？')) return;
-    document.getElementById('statusText').textContent = '正在停止...';
-    try {
-        const res = await fetch('/api/service/stop', { method: 'POST' });
-        const data = await res.json();
-        document.getElementById('terminalOutput').textContent = data.output || data.error;
-        document.getElementById('terminalOutput').style.display = 'block';
-        setTimeout(fetchStatus, 2000);
-    } catch (e) {
-        alert('操作失败');
-    }
-});
-
-// --- Config Management ---
-async function fetchConfig() {
-    try {
-        const res = await fetch('/api/config');
-        if (res.status === 401) window.location.href = '/login.html';
-        globalConfig = await res.json();
-        renderProviders();
-        renderActiveModelSelect();
-    } catch (e) {
-        console.error('Failed to fetch config:', e);
-    }
-}
-
-function renderActiveModelSelect() {
-    const select = document.getElementById('activeModelSelect');
-    if (!select) return;
-    select.innerHTML = '';
-
-    let optionsFound = false;
-
-    if (globalConfig && globalConfig.providers) {
-        Object.keys(globalConfig.providers).forEach(providerName => {
-            const provider = globalConfig.providers[providerName];
-            if (provider.models && provider.models.length > 0) {
-                const optgroup = document.createElement('optgroup');
-                optgroup.label = providerName;
-
-                provider.models.forEach(model => {
-                    const value = `${providerName}/${model.id}`;
-                    const option = document.createElement('option');
-                    option.value = value;
-                    option.textContent = model.name || model.id;
-                    if (value === globalConfig.activeModel) {
-                        option.selected = true;
-                    }
-                    optgroup.appendChild(option);
-                    optionsFound = true;
-                });
-
-                select.appendChild(optgroup);
-            }
-        });
-    }
-
-    if (!optionsFound) {
-        const option = document.createElement('option');
-        option.textContent = '暂无可用模型，请先添加';
-        option.disabled = true;
-        select.appendChild(option);
-    }
-}
-
-document.getElementById('saveActiveModelBtn')?.addEventListener('click', async () => {
-    const select = document.getElementById('activeModelSelect');
-    const modelStr = select.value;
-    if (!modelStr) return;
-
-    try {
-        const res = await fetch('/api/active-model', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ modelStr })
-        });
-        if (res.ok) {
-            alert('默认模型保存成功');
-            fetchConfig();
-        } else {
-            alert('保存失败: ' + await readErrorMessage(res, '保存失败'));
-        }
-    } catch (e) {
-        alert('网络错误');
-    }
-});
-
-// --- Providers Management ---
-function renderProviders() {
-    const list = document.getElementById('providersList');
-    if (!list) return;
-    list.innerHTML = '';
-
-    if (!globalConfig.providers || Object.keys(globalConfig.providers).length === 0) {
-        list.innerHTML = '<div class="empty-state">暂无渠道配置，请点击右上角添加</div>';
+function setTerminalOutput(message) {
+    const output = $('terminalOutput');
+    if (!output) {
         return;
     }
 
-    Object.keys(globalConfig.providers).forEach(providerName => {
-        const provider = globalConfig.providers[providerName];
+    const text = typeof message === 'string' ? message.trim() : '';
+    output.textContent = text;
+    output.style.display = text ? 'block' : 'none';
+}
 
-        const section = document.createElement('div');
-        section.className = 'provider-section';
+function buildProviderSummary(providerName, provider) {
+    const wrapper = createElement('div', 'provider-title');
+    wrapper.append(document.createTextNode(providerName));
 
-        // Header
-        const header = document.createElement('div');
-        header.className = 'provider-header';
+    const apiBadge = createElement('span', 'badge badge-success', provider.api || 'unknown');
+    wrapper.appendChild(apiBadge);
 
-        const titleContainer = document.createElement('div');
-        titleContainer.className = 'provider-title';
-        titleContainer.innerHTML = `
-            ${providerName}
-            <span class="badge badge-success">${provider.api}</span>
-            <span class="text-muted ml-2">${provider.baseUrl}</span>
-        `;
+    const urlText = createElement('span', 'text-muted', provider.baseUrl || '');
+    wrapper.appendChild(urlText);
 
-        const actionsContainer = document.createElement('div');
-        actionsContainer.className = 'actions-cell';
+    if (provider.hasApiKey) {
+        wrapper.appendChild(createElement('span', 'badge badge-neutral', '已配置密钥'));
+    }
 
-        const addModelBtn = document.createElement('button');
-        addModelBtn.type = 'button';
-        addModelBtn.className = 'btn btn-secondary';
-        addModelBtn.style.padding = '6px 12px';
-        addModelBtn.textContent = '添加模型';
-        addModelBtn.onclick = () => openModelModal(providerName);
+    return wrapper;
+}
 
-        const editProviderBtn = document.createElement('button');
-        editProviderBtn.type = 'button';
-        editProviderBtn.className = 'btn btn-secondary';
-        editProviderBtn.style.padding = '6px 12px';
-        editProviderBtn.style.marginRight = '8px';
-        editProviderBtn.textContent = '编辑渠道';
-        editProviderBtn.onclick = () => openEditProviderModal(providerName, provider);
-        actionsContainer.appendChild(editProviderBtn);
-        const delProviderBtn = document.createElement('button');
-        delProviderBtn.type = 'button';
-        delProviderBtn.className = 'btn btn-danger';
-        delProviderBtn.style.padding = '6px 12px';
-        delProviderBtn.textContent = '删除渠道';
-        delProviderBtn.onclick = (event) => deleteProvider(event, providerName);
+function createButton(label, className, onClick) {
+    const button = createElement('button', className, label);
+    button.type = 'button';
+    button.addEventListener('click', onClick);
+    return button;
+}
 
-        actionsContainer.appendChild(addModelBtn);
-        actionsContainer.appendChild(delProviderBtn);
+function createModelRow(providerName, model) {
+    const tr = document.createElement('tr');
+    const isPrimary = globalConfig.activeModel === `${providerName}/${model.id}`;
 
-        header.appendChild(titleContainer);
-        header.appendChild(actionsContainer);
+    const idCell = createElement('td', '', model.id);
+    const nameCell = createElement('td', '', model.name || model.id);
+    const contextCell = createElement('td', '', String(model.contextWindow || '-'));
+
+    const statusCell = createElement('td');
+    if (isPrimary) {
+        statusCell.appendChild(createElement('span', 'badge badge-active', '当前默认'));
+    }
+
+    const actionsCell = createElement('td', 'actions-cell actions-cell-compact');
+    actionsCell.appendChild(
+        createButton('编辑', 'btn btn-secondary btn-small', () => {
+            openEditModelModal(providerName, model);
+        })
+    );
+    actionsCell.appendChild(
+        createButton('删除', 'btn btn-danger btn-small', (event) => {
+            deleteModel(event, providerName, model.id);
+        })
+    );
+
+    tr.appendChild(idCell);
+    tr.appendChild(nameCell);
+    tr.appendChild(contextCell);
+    tr.appendChild(statusCell);
+    tr.appendChild(actionsCell);
+
+    return tr;
+}
+
+function renderProviders() {
+    const list = $('providersList');
+    if (!list) {
+        return;
+    }
+
+    list.replaceChildren();
+
+    const providers = globalConfig.providers || {};
+    const providerEntries = Object.entries(providers);
+
+    if (providerEntries.length === 0) {
+        list.appendChild(createElement('div', 'empty-state', '暂无渠道配置，请点击右上角添加'));
+        return;
+    }
+
+    providerEntries.forEach(([providerName, provider]) => {
+        const section = createElement('div', 'provider-section');
+        const header = createElement('div', 'provider-header');
+        const actions = createElement('div', 'actions-cell');
+
+        const editProviderBtn = createButton('编辑渠道', 'btn btn-secondary', () => {
+            openEditProviderModal(providerName, provider);
+        });
+        const addModelBtn = createButton('添加模型', 'btn btn-secondary', () => {
+            openModelModal(providerName);
+        });
+        const deleteProviderBtn = createButton('删除渠道', 'btn btn-danger', (event) => {
+            deleteProvider(event, providerName);
+        });
+
+        actions.appendChild(editProviderBtn);
+        actions.appendChild(addModelBtn);
+        actions.appendChild(deleteProviderBtn);
+
+        header.appendChild(buildProviderSummary(providerName, provider));
+        header.appendChild(actions);
         section.appendChild(header);
 
-        // Models Table
-        if (provider.models && provider.models.length > 0) {
-            const table = document.createElement('table');
-            table.className = 'table';
-            table.innerHTML = `
-                <thead>
-                    <tr>
-                        <th>模型 ID</th>
-                        <th>显示名称</th>
-                        <th>上下文窗口</th>
-                        <th>状态</th>
-                        <th style="width: 100px;">操作</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${provider.models.map(m => {
-                        const isPrimary = globalConfig.activeModel === `${providerName}/${m.id}`;
-                        return `
-                        <tr>
-                            <td>${m.id}</td>
-                            <td>${m.name || m.id}</td>
-                            <td>${m.contextWindow || '-'}</td>
-                            <td>${isPrimary ? '<span class="badge badge-active">当前默认</span>' : ''}</td>
-                            <td>
-                                <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 12px; margin-right: 4px;" onclick="openEditModelModal('${providerName}', '${m.id}', '${m.name || ''}', ${m.contextWindow || 128000}, ${m.maxTokens || 4096})">编辑</button>
-                                <button type="button" class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;" onclick="deleteModel(event, '${providerName}', '${m.id}')">删除</button>
-                            </td>
-                        </tr>
-                        `;
-                    }).join('')}
-                </tbody>
-            `;
+        if (Array.isArray(provider.models) && provider.models.length > 0) {
+            const table = createElement('table', 'table');
+            const thead = document.createElement('thead');
+            const headRow = document.createElement('tr');
+            ['模型 ID', '显示名称', '上下文窗口', '状态', '操作'].forEach((title) => {
+                headRow.appendChild(createElement('th', '', title));
+            });
+            thead.appendChild(headRow);
+
+            const tbody = document.createElement('tbody');
+            provider.models.forEach((model) => {
+                tbody.appendChild(createModelRow(providerName, model));
+            });
+
+            table.appendChild(thead);
+            table.appendChild(tbody);
             section.appendChild(table);
         } else {
-            const emptyMsg = document.createElement('div');
-            emptyMsg.style.padding = '20px';
-            emptyMsg.style.textAlign = 'center';
-            emptyMsg.style.color = 'var(--text-muted)';
-            emptyMsg.textContent = '该渠道下暂无模型';
-            section.appendChild(emptyMsg);
+            section.appendChild(createElement('div', 'provider-empty', '该渠道下暂无模型'));
         }
 
         list.appendChild(section);
     });
 }
 
-document.getElementById('addProviderBtn')?.addEventListener('click', () => {
-    document.getElementById('providerForm').reset();
-    document.getElementById('editOldProviderName').value = '';
-    document.getElementById('providerModalTitle').textContent = '添加渠道';
-    document.getElementById('providerModal').classList.add('active');
-});
-
-document.getElementById('providerForm')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const oldName = document.getElementById('editOldProviderName').value;
-    const isEdit = !!oldName;
-    
-    const data = {
-        name: document.getElementById('providerName').value,
-        baseUrl: document.getElementById('providerBaseUrl').value,
-        apiKey: document.getElementById('providerApiKey').value,
-        api: document.getElementById('providerApiType').value
-    };
-
-    try {
-        const url = isEdit ? '/api/providers/' + encodeURIComponent(oldName) : '/api/providers';
-        const method = isEdit ? 'PUT' : 'POST';
-        const res = await fetch(url, {
-            method: method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        if (res.ok) {
-            document.getElementById('providerModal').classList.remove('active');
-            fetchConfig();
-            alert(isEdit ? '渠道更新成功' : '渠道添加成功');
-        } else {
-            alert('添加失败: ' + await readErrorMessage(res, '添加失败'));
-        }
-    } catch (e) {
-        alert('网络错误');
+function renderActiveModelSelect() {
+    const select = $('activeModelSelect');
+    if (!select) {
+        return;
     }
-});
+
+    select.replaceChildren();
+
+    let hasOptions = false;
+    Object.entries(globalConfig.providers || {}).forEach(([providerName, provider]) => {
+        const models = Array.isArray(provider.models) ? provider.models : [];
+        if (models.length === 0) {
+            return;
+        }
+
+        const group = document.createElement('optgroup');
+        group.label = providerName;
+
+        models.forEach((model) => {
+            const option = document.createElement('option');
+            option.value = `${providerName}/${model.id}`;
+            option.textContent = model.name || model.id;
+            option.selected = option.value === globalConfig.activeModel;
+            group.appendChild(option);
+            hasOptions = true;
+        });
+
+        select.appendChild(group);
+    });
+
+    if (!hasOptions) {
+        const option = document.createElement('option');
+        option.textContent = '暂无可用模型，请先添加';
+        option.disabled = true;
+        option.selected = true;
+        select.appendChild(option);
+    }
+}
+
+async function fetchConfig() {
+    try {
+        const res = await apiFetch('/api/config', { headers: {} });
+        if (!res.ok) {
+            throw new Error(await readErrorMessage(res, '读取配置失败'));
+        }
+        globalConfig = await res.json();
+        renderProviders();
+        renderActiveModelSelect();
+    } catch (error) {
+        if (error.message !== 'Unauthorized') {
+            console.error('Failed to fetch config:', error);
+        }
+    }
+}
+
+async function fetchStatus() {
+    try {
+        const res = await apiFetch('/api/service/status', { headers: {} });
+        if (!res.ok) {
+            throw new Error(await readErrorMessage(res, '读取服务状态失败'));
+        }
+        const data = await res.json();
+        const indicator = $('statusIndicator');
+        const text = $('statusText');
+
+        if (indicator && text) {
+            indicator.className = `status-indicator ${data.isRunning ? 'status-online' : 'status-offline'}`;
+            text.textContent = data.isRunning ? '运行中' : '已停止';
+        }
+
+        setTerminalOutput(data.output);
+    } catch (error) {
+        if (error.message !== 'Unauthorized') {
+            console.error('Failed to fetch status:', error);
+        }
+    }
+}
+
+function startStatusPolling() {
+    if (statusTimer || !$('statusText')) {
+        return;
+    }
+
+    fetchStatus();
+    statusTimer = window.setInterval(fetchStatus, 30000);
+}
+
+function stopStatusPolling() {
+    if (statusTimer) {
+        window.clearInterval(statusTimer);
+        statusTimer = null;
+    }
+}
+
+async function submitJson(url, method, data) {
+    return apiFetch(url, {
+        method,
+        body: JSON.stringify(data)
+    });
+}
+
+function openModelModal(providerName) {
+    $('modelForm')?.reset();
+    $('editOldModelId').value = '';
+    $('modelProviderName').value = providerName;
+    setText('modelModalTitle', '添加模型');
+    showModal('modelModal');
+}
+
+function openEditModelModal(providerName, model) {
+    $('modelForm')?.reset();
+    $('modelProviderName').value = providerName;
+    $('editOldModelId').value = model.id;
+    $('modelId').value = model.id;
+    $('modelName').value = model.name || model.id;
+    $('modelContextWindow').value = model.contextWindow || 128000;
+    $('modelMaxTokens').value = model.maxTokens || 4096;
+    setText('modelModalTitle', '编辑模型');
+    showModal('modelModal');
+}
+
+function openEditProviderModal(name, provider) {
+    $('providerForm')?.reset();
+    $('editOldProviderName').value = name;
+    $('providerName').value = name;
+    $('providerBaseUrl').value = provider.baseUrl || '';
+    $('providerApiKey').value = '';
+    $('providerApiType').value = provider.api || 'openai-completions';
+    $('providerApiKey').placeholder = provider.hasApiKey ? '留空则保持当前 API Key' : '请输入 API Key';
+    $('providerApiKey').required = false;
+    setText('providerModalTitle', '编辑渠道');
+    showModal('providerModal');
+}
 
 async function deleteProvider(event, name) {
-    if (event) {
-        event.preventDefault();
-        event.stopPropagation();
+    event?.preventDefault();
+    event?.stopPropagation();
+
+    if (!window.confirm(`确定要删除渠道 ${name} 吗？这将删除其下所有模型。`)) {
+        return;
     }
-    if (!confirm(`确定要删除渠道 ${name} 吗？这将删除其下所有模型。`)) return;
+
     try {
-        const res = await fetch(`/api/providers/${encodeURIComponent(name)}`, { method: 'DELETE' });
-        if (res.ok) {
-            fetchConfig();
-            alert('删除成功');
-        } else {
-            alert('删除失败');
-        }
-    } catch (e) {
-        alert('网络错误');
-    }
-}
-
-// --- Model Management ---
-function openModelModal(providerName) {
-    document.getElementById('modelForm').reset();
-    document.getElementById('editOldModelId').value = '';
-    document.getElementById('modelModalTitle').textContent = '添加模型';
-    document.getElementById('modelProviderName').value = providerName;
-    document.getElementById('modelModal').classList.add('active');
-}
-
-document.getElementById('modelForm')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const providerName = document.getElementById('modelProviderName').value;
-    const data = {
-        id: document.getElementById('modelId').value,
-        name: document.getElementById('modelName').value,
-        contextWindow: parseInt(document.getElementById('modelContextWindow').value, 10),
-        maxTokens: parseInt(document.getElementById('modelMaxTokens').value, 10)
-    };
-
-    const oldModelId = document.getElementById('editOldModelId').value;
-    const isEdit = !!oldModelId;
-    const url = isEdit ? `/api/providers/${encodeURIComponent(providerName)}/models/${encodeURIComponent(oldModelId)}` : `/api/providers/${encodeURIComponent(providerName)}/models`;
-    const method = isEdit ? 'PUT' : 'POST';
-    try {
-        const res = await fetch(url, {
-            method: method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
+        const res = await apiFetch(`/api/providers/${encodeURIComponent(name)}`, {
+            method: 'DELETE',
+            headers: {}
         });
-        if (res.ok) {
-            document.getElementById('modelModal').classList.remove('active');
-            fetchConfig();
-            alert(isEdit ? '模型更新成功' : '模型添加成功');
-        } else {
-            alert('操作失败: ' + await readErrorMessage(res, '操作失败'));
+        if (!res.ok) {
+            throw new Error(await readErrorMessage(res, '删除失败'));
         }
-    } catch (e) {
-        alert('网络错误');
+
+        await fetchConfig();
+        window.alert('删除成功');
+    } catch (error) {
+        window.alert(error.message || '网络错误');
     }
-});
+}
 
 async function deleteModel(event, providerName, modelId) {
-    if (event) {
-        event.preventDefault();
-        event.stopPropagation();
+    event?.preventDefault();
+    event?.stopPropagation();
+
+    if (!window.confirm(`确定要删除模型 ${modelId} 吗？`)) {
+        return;
     }
-    if (!confirm(`确定要删除模型 ${modelId} 吗？`)) return;
+
     try {
-        const res = await fetch(`/api/providers/${encodeURIComponent(providerName)}/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
-        if (res.ok) {
-            fetchConfig();
-            alert('删除成功');
-        } else {
-            alert('删除失败');
+        const res = await apiFetch(
+            `/api/providers/${encodeURIComponent(providerName)}/models/${encodeURIComponent(modelId)}`,
+            { method: 'DELETE', headers: {} }
+        );
+        if (!res.ok) {
+            throw new Error(await readErrorMessage(res, '删除失败'));
         }
-    } catch (e) {
-        alert('网络错误');
+
+        await fetchConfig();
+        window.alert('删除成功');
+    } catch (error) {
+        window.alert(error.message || '网络错误');
     }
 }
 
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.close-btn, .close-btn-action').forEach((button) => {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            hideModal(button.dataset.modal);
+        });
+    });
 
-// --- EDIT FUNCTIONS ---
-function openEditProviderModal(name, provider) {
-    document.getElementById('providerForm').reset();
-    document.getElementById('editOldProviderName').value = '';
-    document.getElementById('providerModalTitle').textContent = '添加渠道';
-    document.getElementById('editOldProviderName').value = name;
-    document.getElementById('providerName').value = name;
-    document.getElementById('providerBaseUrl').value = provider.baseUrl || '';
-    document.getElementById('providerApiKey').value = provider.apiKey || '';
-    document.getElementById('providerApiType').value = provider.api || 'openai-completions';
-    
-    document.getElementById('providerModalTitle').textContent = '编辑渠道';
-    document.getElementById('providerModal').classList.add('active');
-}
+    $('logoutBtn')?.addEventListener('click', async (event) => {
+        event.preventDefault();
+        try {
+            await apiFetch('/api/logout', { method: 'POST', headers: {} });
+        } finally {
+            window.location.href = '/login.html';
+        }
+    });
 
-function openEditModelModal(providerName, id, name, contextWindow, maxTokens) {
-    document.getElementById('modelForm').reset();
-    document.getElementById('editOldModelId').value = '';
-    document.getElementById('modelModalTitle').textContent = '添加模型';
-    document.getElementById('modelProviderName').value = providerName;
-    document.getElementById('editOldModelId').value = id;
-    
-    document.getElementById('modelId').value = id;
-    document.getElementById('modelName').value = name || id;
-    document.getElementById('modelContextWindow').value = contextWindow;
-    document.getElementById('modelMaxTokens').value = maxTokens;
-    
-    document.getElementById('modelModalTitle').textContent = '编辑模型';
-    document.getElementById('modelModal').classList.add('active');
-}
+    $('addProviderBtn')?.addEventListener('click', () => {
+        $('providerForm')?.reset();
+        $('editOldProviderName').value = '';
+        $('providerApiKey').required = true;
+        $('providerApiKey').placeholder = '';
+        setText('providerModalTitle', '添加渠道');
+        showModal('providerModal');
+    });
+
+    $('providerForm')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const oldName = $('editOldProviderName').value.trim();
+        const isEdit = Boolean(oldName);
+        const payload = {
+            name: $('providerName').value.trim(),
+            baseUrl: $('providerBaseUrl').value.trim(),
+            apiKey: $('providerApiKey').value.trim(),
+            api: $('providerApiType').value
+        };
+
+        if (!isEdit && !payload.apiKey) {
+            window.alert('API Key 不能为空');
+            return;
+        }
+
+        try {
+            const res = await submitJson(
+                isEdit ? `/api/providers/${encodeURIComponent(oldName)}` : '/api/providers',
+                isEdit ? 'PUT' : 'POST',
+                payload
+            );
+            if (!res.ok) {
+                throw new Error(await readErrorMessage(res, isEdit ? '更新失败' : '添加失败'));
+            }
+
+            hideModal('providerModal');
+            await fetchConfig();
+            window.alert(isEdit ? '渠道更新成功' : '渠道添加成功');
+        } catch (error) {
+            window.alert(error.message || '网络错误');
+        }
+    });
+
+    $('modelForm')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const providerName = $('modelProviderName').value;
+        const oldModelId = $('editOldModelId').value.trim();
+        const isEdit = Boolean(oldModelId);
+        const payload = {
+            id: $('modelId').value.trim(),
+            name: $('modelName').value.trim(),
+            contextWindow: $('modelContextWindow').value,
+            maxTokens: $('modelMaxTokens').value
+        };
+
+        try {
+            const res = await submitJson(
+                isEdit
+                    ? `/api/providers/${encodeURIComponent(providerName)}/models/${encodeURIComponent(oldModelId)}`
+                    : `/api/providers/${encodeURIComponent(providerName)}/models`,
+                isEdit ? 'PUT' : 'POST',
+                payload
+            );
+            if (!res.ok) {
+                throw new Error(await readErrorMessage(res, '保存失败'));
+            }
+
+            hideModal('modelModal');
+            await fetchConfig();
+            window.alert(isEdit ? '模型更新成功' : '模型添加成功');
+        } catch (error) {
+            window.alert(error.message || '网络错误');
+        }
+    });
+
+    $('saveActiveModelBtn')?.addEventListener('click', async () => {
+        const modelStr = $('activeModelSelect')?.value;
+        if (!modelStr) {
+            return;
+        }
+
+        try {
+            const res = await submitJson('/api/active-model', 'POST', { modelStr });
+            if (!res.ok) {
+                throw new Error(await readErrorMessage(res, '保存失败'));
+            }
+
+            window.alert('默认模型保存成功');
+            await fetchConfig();
+        } catch (error) {
+            window.alert(error.message || '网络错误');
+        }
+    });
+
+    $('restartBtn')?.addEventListener('click', async () => {
+        setText('statusText', '正在重启...');
+        try {
+            const res = await apiFetch('/api/service/restart', { method: 'POST', headers: {} });
+            if (!res.ok) {
+                throw new Error(await readErrorMessage(res, '重启失败'));
+            }
+            const data = await res.json();
+            setTerminalOutput(data.output || data.error);
+            window.setTimeout(fetchStatus, 2000);
+        } catch (error) {
+            window.alert(error.message || '操作失败');
+            await fetchStatus();
+        }
+    });
+
+    $('stopBtn')?.addEventListener('click', async () => {
+        if (!window.confirm('确定要停止服务吗？')) {
+            return;
+        }
+
+        setText('statusText', '正在停止...');
+        try {
+            const res = await apiFetch('/api/service/stop', { method: 'POST', headers: {} });
+            if (!res.ok) {
+                throw new Error(await readErrorMessage(res, '停止失败'));
+            }
+            const data = await res.json();
+            setTerminalOutput(data.output || data.error);
+            window.setTimeout(fetchStatus, 2000);
+        } catch (error) {
+            window.alert(error.message || '操作失败');
+            await fetchStatus();
+        }
+    });
+
+    if (window.location.pathname === '/' || window.location.pathname === '/index.html') {
+        fetchConfig();
+        startStatusPolling();
+    } else {
+        stopStatusPolling();
+    }
+});
