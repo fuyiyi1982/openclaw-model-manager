@@ -17,31 +17,43 @@
    cd openclaw-model-manager
    ```
 
-2. **配置环境变量**
-   编辑项目根目录下的 `.env` 文件。根据机器上 OpenClaw 的实际安装情况进行修改：
-   - `TARGET_USER`: 运行 OpenClaw 服务的用户名（如 `root` 或是普通用户名）。
-   - `TARGET_UID`: 该用户的 UID，用来连接 systemd 服务（`root` 是 `0`，普通用户通常是 `1000`）。
-   - `OPENCLAW_CONFIG_PATH`: `openclaw.json` 的绝对路径。
-   - `OPENCLAW_BIN`: `openclaw` 命令的绝对路径。
+2. **可选：环境变量覆盖**
+   默认情况下，`setup.sh` 会自动探测以下信息并生成运行时配置：
+   - OpenClaw 的实际安装路径
+   - Node 的实际安装路径
+   - OpenClaw 的 `openclaw.json` 路径
+   - 已存在的 `openclaw-gateway*.service`
 
-3. **执行环境初始化脚本（必须使用 sudo）**
-   这将在系统内生成必要的代理脚本，并配置免密 `sudo` 权限以跨越权限墙。
+   如果目标机器环境特别特殊，才需要编辑 `.env` 覆盖默认探测结果。常用覆盖项：
+   - `TARGET_USER`: 运行 OpenClaw Gateway 的用户
+   - `OPENCLAW_CONFIG_PATH`: 指定 `openclaw.json` 路径
+   - `OPENCLAW_BIN`: 指定 `openclaw` 路径
+   - `NODE_BIN`: 指定 `node` 路径
+   - `PANEL_USER`: 指定面板服务运行用户
+
+3. **执行一键初始化脚本（必须使用 sudo）**
+   这一步会自动完成以下动作：
+   - 探测并接管现有 OpenClaw systemd 服务
+   - 如果没有 Gateway 服务，则生成标准的 `openclaw-gateway.service`
+   - 生成运行时探测结果与管理代理脚本
+   - 如果缺少依赖且系统存在 `npm`，自动执行 `npm install --omit=dev`
+   - 生成 `openclaw-model-manager.service`
+   - 配置面板所需的免密 `sudo`
+   - 尝试启动面板服务
    ```bash
    sudo ./setup.sh
    ```
 
-4. **安装依赖**
+4. **依赖安装失败时手动补装**
+   如果目标机器没有 `npm`，或者自动安装失败，再手动执行：
    ```bash
    npm install
    ```
 
-5. **配置与启动系统服务**
-   项目附带基于 Systemd 的管理方案，建议将其注册为系统服务以保证后台持续运行及开机自启。
+5. **需要时手动重启面板服务**
+   `setup.sh` 已经生成 `/etc/systemd/system/openclaw-model-manager.service` 并会尽量自动启动；如果需要手动重启：
    ```bash
-   sudo cp openclaw-model-manager.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable openclaw-model-manager
-   sudo systemctl start openclaw-model-manager
+   sudo systemctl restart openclaw-model-manager
    ```
 
 ## 默认账号

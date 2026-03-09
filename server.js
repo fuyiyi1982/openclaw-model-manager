@@ -147,6 +147,18 @@ async function runManageConfig(action, input) {
     return (stdout || stderr || '').trim();
 }
 
+function tryParseJson(value) {
+    if (!value) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(value);
+    } catch (_) {
+        return null;
+    }
+}
+
 async function readOpenclawConfig() {
     const output = await runManageConfig('read');
     if (!output) {
@@ -296,12 +308,48 @@ async function runServiceCommand(action) {
             ['/usr/local/bin/manage-openclaw-service.sh', action],
             { encoding: 'utf8', maxBuffer: 1024 * 1024 }
         );
+        const rawOutput = serializeServiceOutput(stdout, stderr);
+        const parsed = tryParseJson(rawOutput);
 
-        return { success: true, output: serializeServiceOutput(stdout, stderr) };
+        if (parsed && typeof parsed === 'object') {
+            return {
+                success: parsed.success !== false,
+                output: typeof parsed.output === 'string' ? parsed.output : rawOutput,
+                active: typeof parsed.active === 'string' ? parsed.active : 'unknown',
+                subState: typeof parsed.subState === 'string' ? parsed.subState : 'unknown',
+                enabled: typeof parsed.enabled === 'string' ? parsed.enabled : 'unknown',
+                scope: typeof parsed.scope === 'string' ? parsed.scope : '',
+                unit: typeof parsed.unit === 'string' ? parsed.unit : '',
+                serviceFile: typeof parsed.serviceFile === 'string' ? parsed.serviceFile : '',
+                error: typeof parsed.error === 'string' ? parsed.error : ''
+            };
+        }
+
+        return { success: true, output: rawOutput, active: 'unknown', subState: 'unknown', enabled: 'unknown' };
     } catch (error) {
+        const rawOutput = serializeServiceOutput(error.stdout, error.stderr, error);
+        const parsed = tryParseJson(rawOutput);
+
+        if (parsed && typeof parsed === 'object') {
+            return {
+                success: parsed.success === true,
+                output: typeof parsed.output === 'string' ? parsed.output : rawOutput,
+                active: typeof parsed.active === 'string' ? parsed.active : 'unknown',
+                subState: typeof parsed.subState === 'string' ? parsed.subState : 'unknown',
+                enabled: typeof parsed.enabled === 'string' ? parsed.enabled : 'unknown',
+                scope: typeof parsed.scope === 'string' ? parsed.scope : '',
+                unit: typeof parsed.unit === 'string' ? parsed.unit : '',
+                serviceFile: typeof parsed.serviceFile === 'string' ? parsed.serviceFile : '',
+                error: typeof parsed.error === 'string' ? parsed.error : error.message
+            };
+        }
+
         return {
             success: false,
-            output: serializeServiceOutput(error.stdout, error.stderr, error),
+            output: rawOutput,
+            active: 'unknown',
+            subState: 'unknown',
+            enabled: 'unknown',
             error: error.message
         };
     }
@@ -626,30 +674,77 @@ app.post('/api/active-model', requireAuth, async (req, res) => {
 
 app.get('/api/service/status', requireAuth, async (req, res) => {
     const result = await runServiceCommand('status');
-    const output = result.output || '';
-    const normalized = output.toLowerCase();
-    const isRunning =
-        normalized.includes('running (pid') ||
-        normalized.includes('state active') ||
-        normalized.includes('active (running)');
+    if (!result.success) {
+        return res.status(500).json({
+            error: result.error || '获取 Gateway 服务状态失败',
+            output: result.output || '',
+            active: result.active || 'unknown',
+            subState: result.subState || 'unknown',
+            enabled: result.enabled || 'unknown',
+            unit: result.unit || '',
+            scope: result.scope || ''
+        });
+    }
 
-    res.json({ output, isRunning });
+    const isRunning = result.active === 'active';
+    return res.json({
+        output: result.output || '',
+        isRunning,
+        active: result.active || 'unknown',
+        subState: result.subState || 'unknown',
+        enabled: result.enabled || 'unknown',
+        unit: result.unit || '',
+        scope: result.scope || '',
+        serviceFile: result.serviceFile || ''
+    });
 });
 
 app.post('/api/service/restart', requireAuth, async (req, res) => {
     const result = await runServiceCommand('restart');
     if (!result.success) {
-        return res.status(500).json({ error: result.error, output: result.output });
+        return res.status(500).json({
+            error: result.error || '重启 Gateway 服务失败',
+            output: result.output || '',
+            active: result.active || 'unknown',
+            subState: result.subState || 'unknown',
+            enabled: result.enabled || 'unknown',
+            unit: result.unit || '',
+            scope: result.scope || ''
+        });
     }
-    return res.json({ success: true, output: result.output });
+    return res.json({
+        success: true,
+        output: result.output || '',
+        active: result.active || 'unknown',
+        subState: result.subState || 'unknown',
+        enabled: result.enabled || 'unknown',
+        unit: result.unit || '',
+        scope: result.scope || ''
+    });
 });
 
 app.post('/api/service/stop', requireAuth, async (req, res) => {
     const result = await runServiceCommand('stop');
     if (!result.success) {
-        return res.status(500).json({ error: result.error, output: result.output });
+        return res.status(500).json({
+            error: result.error || '停止 Gateway 服务失败',
+            output: result.output || '',
+            active: result.active || 'unknown',
+            subState: result.subState || 'unknown',
+            enabled: result.enabled || 'unknown',
+            unit: result.unit || '',
+            scope: result.scope || ''
+        });
     }
-    return res.json({ success: true, output: result.output });
+    return res.json({
+        success: true,
+        output: result.output || '',
+        active: result.active || 'unknown',
+        subState: result.subState || 'unknown',
+        enabled: result.enabled || 'unknown',
+        unit: result.unit || '',
+        scope: result.scope || ''
+    });
 });
 
 app.get('/style.css', express.static(PUBLIC_DIR, { index: false }));
