@@ -21,7 +21,7 @@ const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS = 5;
 const VALID_PROVIDER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 const VALID_MODEL_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/;
-const VALID_API_TYPES = new Set(['openai-completions', 'anthropic-messages']);
+const VALID_API_TYPES = new Set(['openai-completions', 'openai-responses', 'anthropic-messages']);
 
 const loginAttempts = new Map();
 
@@ -134,8 +134,26 @@ async function runManageConfig(action, input) {
         maxBuffer: 1024 * 1024
     };
 
-    if (input !== undefined) {
-        options.input = input;
+    if (action === 'write') {
+        return new Promise((resolve, reject) => {
+            const child = execFile(
+                'sudo',
+                ['/usr/local/bin/manage-openclaw-config.sh', action],
+                options,
+                (error, stdout, stderr) => {
+                    const output = (stdout || stderr || '').trim();
+                    if (error) {
+                        error.stdout = stdout;
+                        error.stderr = stderr;
+                        reject(error);
+                        return;
+                    }
+                    resolve(output);
+                }
+            );
+
+            child.stdin.end(input === undefined ? '' : input);
+        });
     }
 
     const { stdout, stderr } = await execFileAsync(
@@ -261,6 +279,20 @@ function ensureAgentDefaults(config) {
     }
 }
 
+function ensureAgentModelAllowlist(config) {
+    ensureAgentDefaults(config);
+
+    if (
+        !config.agents.defaults.models ||
+        typeof config.agents.defaults.models !== 'object' ||
+        Array.isArray(config.agents.defaults.models)
+    ) {
+        return null;
+    }
+
+    return config.agents.defaults.models;
+}
+
 function setConfiguredDefaultModel(config, modelStr) {
     ensureAgentDefaults(config);
 
@@ -270,6 +302,19 @@ function setConfiguredDefaultModel(config, modelStr) {
     }
 
     delete config.agents.defaults.model.primary;
+}
+
+function ensureDefaultModelAllowed(config, modelStr) {
+    if (!isNonEmptyString(modelStr)) {
+        return;
+    }
+
+    const allowlist = ensureAgentModelAllowlist(config);
+    if (!allowlist || allowlist[modelStr]) {
+        return;
+    }
+
+    allowlist[modelStr] = {};
 }
 
 function sanitizeProviderForClient(provider) {
@@ -802,6 +847,7 @@ app.post('/api/active-model', requireAuth, async (req, res) => {
         }
 
         setConfiguredDefaultModel(config, modelStr);
+        ensureDefaultModelAllowed(config, modelStr);
         await writeOpenclawConfig(config);
 
         return res.json({ success: true });
