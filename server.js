@@ -221,6 +221,57 @@ async function writeOpenclawConfig(config) {
     await runManageConfig('write', JSON.stringify(config, null, 2));
 }
 
+function getLegacyDefaultModel(config) {
+    const fallbacks = [
+        config?.defaultModel,
+        config?.activeModel,
+        config?.models?.default,
+        config?.models?.defaultModel
+    ];
+
+    return fallbacks.find(isNonEmptyString) || '';
+}
+
+function getConfiguredDefaultModel(config) {
+    const primary = config?.agents?.defaults?.model?.primary;
+    if (isNonEmptyString(primary)) {
+        return primary.trim();
+    }
+
+    return getLegacyDefaultModel(config);
+}
+
+function ensureAgentDefaults(config) {
+    if (!config.agents || typeof config.agents !== 'object' || Array.isArray(config.agents)) {
+        config.agents = {};
+    }
+    if (
+        !config.agents.defaults ||
+        typeof config.agents.defaults !== 'object' ||
+        Array.isArray(config.agents.defaults)
+    ) {
+        config.agents.defaults = {};
+    }
+    if (
+        !config.agents.defaults.model ||
+        typeof config.agents.defaults.model !== 'object' ||
+        Array.isArray(config.agents.defaults.model)
+    ) {
+        config.agents.defaults.model = {};
+    }
+}
+
+function setConfiguredDefaultModel(config, modelStr) {
+    ensureAgentDefaults(config);
+
+    if (isNonEmptyString(modelStr)) {
+        config.agents.defaults.model.primary = modelStr.trim();
+        return;
+    }
+
+    delete config.agents.defaults.model.primary;
+}
+
 function sanitizeProviderForClient(provider) {
     return {
         baseUrl: provider.baseUrl || '',
@@ -317,20 +368,8 @@ function validateModelPayload(body) {
     };
 }
 
-function ensureAgentDefaults(config) {
-    if (!config.agents) {
-        config.agents = {};
-    }
-    if (!config.agents.defaults) {
-        config.agents.defaults = {};
-    }
-    if (!config.agents.defaults.model) {
-        config.agents.defaults.model = {};
-    }
-}
-
 function clearActiveModelIfMissing(config) {
-    const activeModel = config.agents?.defaults?.model?.primary;
+    const activeModel = getConfiguredDefaultModel(config);
     if (!activeModel) {
         return;
     }
@@ -341,8 +380,7 @@ function clearActiveModelIfMissing(config) {
     const modelExists = Array.isArray(provider?.models) && provider.models.some((model) => model.id === modelId);
 
     if (!modelExists) {
-        ensureAgentDefaults(config);
-        delete config.agents.defaults.model.primary;
+        setConfiguredDefaultModel(config, '');
     }
 }
 
@@ -538,7 +576,7 @@ app.get('/api/config', requireAuth, async (req, res) => {
                 sanitizeProviderForClient(provider)
             ])
         );
-        const activeModel = config.agents?.defaults?.model?.primary || '';
+        const activeModel = getConfiguredDefaultModel(config);
 
         return res.json({ providers, activeModel });
     } catch (error) {
@@ -611,10 +649,9 @@ app.put('/api/providers/:oldName', requireAuth, async (req, res) => {
         }
         providers[name] = providerData;
 
-        const activeModel = config.agents?.defaults?.model?.primary;
+        const activeModel = getConfiguredDefaultModel(config);
         if (activeModel && activeModel.startsWith(`${oldName}/`)) {
-            ensureAgentDefaults(config);
-            config.agents.defaults.model.primary = activeModel.replace(`${oldName}/`, `${name}/`);
+            setConfiguredDefaultModel(config, activeModel.replace(`${oldName}/`, `${name}/`));
         }
 
         await writeOpenclawConfig(config);
@@ -708,10 +745,9 @@ app.put('/api/providers/:providerName/models/:oldModelId', requireAuth, async (r
             ...validation.value
         };
 
-        const activeModel = config.agents?.defaults?.model?.primary;
+        const activeModel = getConfiguredDefaultModel(config);
         if (activeModel === `${providerName}/${oldModelId}`) {
-            ensureAgentDefaults(config);
-            config.agents.defaults.model.primary = `${providerName}/${validation.value.id}`;
+            setConfiguredDefaultModel(config, `${providerName}/${validation.value.id}`);
         }
 
         await writeOpenclawConfig(config);
@@ -765,8 +801,7 @@ app.post('/api/active-model', requireAuth, async (req, res) => {
             return res.status(404).json({ error: '目标模型不存在' });
         }
 
-        ensureAgentDefaults(config);
-        config.agents.defaults.model.primary = modelStr;
+        setConfiguredDefaultModel(config, modelStr);
         await writeOpenclawConfig(config);
 
         return res.json({ success: true });
@@ -957,6 +992,15 @@ app.use((req, res) => {
     res.status(404).json({ error: 'Not Found' });
 });
 
-app.listen(PORT, HOST, () => {
-    console.log(`OpenClaw Panel is running on http://${HOST}:${PORT}`);
-});
+if (require.main === module) {
+    app.listen(PORT, HOST, () => {
+        console.log(`OpenClaw Panel is running on http://${HOST}:${PORT}`);
+    });
+}
+
+module.exports = {
+    app,
+    clearActiveModelIfMissing,
+    getConfiguredDefaultModel,
+    setConfiguredDefaultModel
+};
